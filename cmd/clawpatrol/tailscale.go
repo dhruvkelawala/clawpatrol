@@ -426,20 +426,20 @@ func (g *Gateway) serveTsnetUDPDNSFlow(c nettype.ConnPacketConn, src, dst netip.
 	buf := make([]byte, 65535)
 	for {
 		_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
-		n, err := c.Read(buf)
+		n, from, err := c.ReadFrom(buf)
 		if err != nil {
-			log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s read err=%v", src, dst, err)
+			log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s readfrom err=%v", src, dst, err)
 			return
 		}
-		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s read bytes=%d", src, dst, n)
+		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s readfrom bytes=%d from=%s local=%s remote=%s", src, dst, n, from, c.LocalAddr(), c.RemoteAddr())
 		resp := g.dnsvip.HandlePacket(buf[:n], "")
 		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s response bytes=%d", src, dst, len(resp))
 		if len(resp) == 0 {
 			continue
 		}
 		_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		wrote, err := c.Write(resp)
-		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s write bytes=%d err=%v", src, dst, wrote, err)
+		wrote, err := c.WriteTo(resp, from)
+		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s writeto bytes=%d to=%s err=%v", src, dst, wrote, from, err)
 		if err != nil {
 			return
 		}
