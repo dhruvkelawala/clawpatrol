@@ -38,6 +38,7 @@ import (
 	"github.com/denoland/clawpatrol/internal/config/runtime"
 	"github.com/google/uuid"
 	"tailscale.com/client/local"
+	"tailscale.com/wgengine/netstack"
 )
 
 // JoinConfig aliases config.JoinConfig so call sites (newWebMux /
@@ -393,6 +394,10 @@ type Gateway struct {
 	// profile mappings — tsnet whole-machine traffic arrives on the
 	// IPv6 ULA, so the IPv4 entry alone isn't enough.
 	tsnetLC *local.Client
+	// tsNetstack is the embedded tsnet's underlying gVisor netstack,
+	// captured for the PR #643 UDP diagnostics (counter dumps). Debug
+	// only.
+	tsNetstack *netstack.Impl
 }
 
 // transportFor returns the cached http.Transport for ep, building it

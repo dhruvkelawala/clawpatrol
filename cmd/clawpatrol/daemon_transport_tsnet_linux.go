@@ -80,7 +80,11 @@ func startTsnetTransport() (daemonTransport, error) {
 		ControlURL: controlURL,
 		Dir:        tsnetDir,
 		Ephemeral:  false,
-		Logf:       func(string, ...any) {},
+		// DEBUG-UDP643: silent by default (as before); when
+		// CLAWPATROL_DEBUG_TSNET=1 route tsnet-internal logs to the
+		// daemon log so we can see the client's magicsock / netstack
+		// view of the UDP return path.
+		Logf: tsnetDebugLogf("daemon", true),
 	}
 
 	log.Printf("daemon: joining tailnet as %q...", hn)

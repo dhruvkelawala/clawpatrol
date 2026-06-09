@@ -45,9 +45,16 @@ if pids="$(pgrep -f "$bin gateway" || true)"; [[ -n "$pids" ]]; then
   sleep 1
 fi
 
-echo "starting gateway as $user with config $config"
+echo "starting gateway as $user with config $config (TS_DEBUG_NETSTACK + CLAWPATROL_DEBUG_TSNET on)"
 : >"$log"
-sudo -u "$user" nohup "$bin" gateway "$config" >"$log" 2>&1 &
+# DEBUG-UDP643: TS_DEBUG_NETSTACK is read by gVisor at process start, so it
+# must be exported into the gateway process here (not toggled at runtime).
+# CLAWPATROL_DEBUG_TSNET routes tsnet-internal logs + the netstack counter
+# dump into the gateway log.
+sudo -u "$user" \
+  TS_DEBUG_NETSTACK=1 \
+  CLAWPATROL_DEBUG_TSNET=1 \
+  nohup "$bin" gateway "$config" >"$log" 2>&1 &
 sleep 5
 
 echo

@@ -122,6 +122,10 @@ func openListener(cfg *config.Gateway, stateDir string) (*tsnet.Server, net.List
 		AuthKey:    authKey,
 		ControlURL: ts.ControlURL,
 		Dir:        dir,
+		// DEBUG-UDP643: surface tsnet-internal logs (magicsock /
+		// wgengine / netstack) when CLAWPATROL_DEBUG_TSNET=1; otherwise
+		// keep tsnet's default log.Printf sink.
+		Logf: tsnetDebugLogf("gateway", false),
 	}
 	// Bring tsnet up. We don't need a tailnet TCP listener — exit-node
 	// routing delivers client conns straight to RegisterFallbackTCPHandler.
@@ -293,6 +297,9 @@ func (g *Gateway) installTsnetUDPCatchAll(s *tsnet.Server) {
 		log.Printf("tsnet: UDP catch-all skipped — Sys().Netstack is %T not *netstack.Impl", impl)
 		return
 	}
+	g.tsNetstack = ns
+	g.logNetstackStats("catch-all-installed")
+	startNetstackStatsDumper(ns)
 	orig := ns.GetUDPHandlerForFlow
 	ns.GetUDPHandlerForFlow = func(src, dst netip.AddrPort) (func(nettype.ConnPacketConn), bool) {
 		disp := g.tsnetUDPDisposition(dst, src.Addr())
@@ -437,9 +444,11 @@ func (g *Gateway) serveTsnetUDPDNSFlow(c nettype.ConnPacketConn, src, dst netip.
 		if len(resp) == 0 {
 			continue
 		}
+		g.logNetstackStats("before-dns-writeback src=" + src.String())
 		_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
 		wrote, err := c.WriteTo(resp, from)
 		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s writeto bytes=%d to=%s err=%v", src, dst, wrote, from, err)
+		g.logNetstackStats("after-dns-writeback src=" + src.String())
 		if err != nil {
 			return
 		}

@@ -198,7 +198,7 @@ func (f *runUDPForwarder) handle(pkt []byte) {
 			f.mu.Unlock()
 			return
 		}
-		log.Printf("[DEBUG-UDP643] dial %s ok local=%s remote=%s", dstAddr, conn.LocalAddr(), conn.RemoteAddr())
+		log.Printf("[DEBUG-UDP643] dial %s ok type=%T local=%s remote=%s", dstAddr, conn, conn.LocalAddr(), conn.RemoteAddr())
 		f.flows[key] = conn
 		go func() {
 			f.readResponses(conn, dstIP, srcIP, dstPort, srcPort)
@@ -220,6 +220,10 @@ func (f *runUDPForwarder) handle(pkt []byte) {
 
 func (f *runUDPForwarder) readResponses(conn net.Conn, srcIP, dstIP [4]byte, srcPort, dstPort uint16) {
 	buf := make([]byte, 65535)
+	log.Printf("[DEBUG-UDP643] waiting for reply on type=%T local=%s remote=%s (src=%d.%d.%d.%d:%d dst=%d.%d.%d.%d:%d)",
+		conn, conn.LocalAddr(), conn.RemoteAddr(),
+		srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort,
+		dstIP[0], dstIP[1], dstIP[2], dstIP[3], dstPort)
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		n, err := conn.Read(buf)
