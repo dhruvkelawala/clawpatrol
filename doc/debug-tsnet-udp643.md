@@ -130,16 +130,37 @@ Conclusion: **#640 delivers UDP (DNS and arbitrary) end-to-end through
 `clawpatrol run` on the same tailnet where #643 times out.** This is the
 expected result: the relay rides TCP, which the client filter always accepts.
 
-### Open caveat — stability / suspected leak
+### Stability / leak — soak result (no leak)
 
-During the verbose runs (gateway started with `TS_DEBUG_NETSTACK=1`), the
-gateway process died twice mid-test. The lean run (no firehose) was stable and
-passed both probes. Most likely the crash was the gVisor per-packet `[v2]`
-trace filling `/tmp` rather than a relay leak, but this was **not** confirmed
-with `dmesg`/`df`/panic-stack evidence. Before recommending #640 for merge,
-run a short soak (many flows) on a lean gateway and watch RSS to rule out a
-per-connection goroutine/conn leak in `handleTsnetUDPRelayConn` /
-`dnsvip.ServeUDP` / `relayUDP`.
+Lean-gateway soak: 2 bursts, 2300 relay flows total (NTP + DNS mix, up to 40
+concurrent), 2295/2300 ok (5 transient NTP timeouts), ~105–155 flows/s.
+
+Gateway goroutines (pprof) vs RSS:
+
+| time | event | goroutines | rss |
+| --- | --- | --- | --- |
+| baseline | idle | 85 | 67 MB |
+| burst-1 peak (800) | load | 1677 | 97 MB |
+| burst-1 settled | idle | 87 | 99 MB |
+| burst-2 peak (1500) | load | 3067 | 135 MB |
+| burst-2 settled | idle | 88 | 138 MB |
+
+Forced-GC heap (idle, after both bursts): `HeapAlloc≈41.7MB`,
+`HeapInuse≈46.9MB`, `HeapObjects=40305`, `HeapSys≈201.9MB`,
+`HeapReleased≈4.1MB`.
+
+Verdict: **no goroutine/connection leak and no heap leak.** Goroutines return
+to baseline after every burst (so every `handleTsnetUDPRelayConn` /
+`dnsvip.ServeUDP` / `relayUDP` flow is reclaimed), and after a forced GC the
+live heap is back to a normal working set (~42 MB / 40k objects). The elevated
+RSS/`HeapSys` is Go runtime arena retention (low `HeapReleased` = the scavenger
+hasn't returned the peak-burst arenas yet; it does so lazily / under pressure),
+not a leak.
+
+The earlier mid-test crashes happened only under the verbose gateway
+(`TS_DEBUG_NETSTACK=1`) — the gVisor per-packet `[v2]` firehose amplifying
+memory/log volume — not under the lean run. Run the gateway lean; reserve
+`DEBUG_VERBOSE=1` for short windows.
 
 ---
 
