@@ -295,16 +295,26 @@ func (g *Gateway) installTsnetUDPCatchAll(s *tsnet.Server) {
 	}
 	orig := ns.GetUDPHandlerForFlow
 	ns.GetUDPHandlerForFlow = func(src, dst netip.AddrPort) (func(nettype.ConnPacketConn), bool) {
-		switch g.tsnetUDPDisposition(dst, src.Addr()) {
+		disp := g.tsnetUDPDisposition(dst, src.Addr())
+		log.Printf("[DEBUG-UDP643-GW] udp flow src=%s dst=%s disposition=%s", src, dst, disp)
+		switch disp {
 		case udpDNS:
-			return g.serveTsnetUDPDNSFlow, true
+			return func(c nettype.ConnPacketConn) {
+				g.serveTsnetUDPDNSFlow(c, src, dst)
+			}, true
 		case udpDrop:
-			return func(c nettype.ConnPacketConn) { _ = c.Close() }, true
+			return func(c nettype.ConnPacketConn) {
+				log.Printf("[DEBUG-UDP643-GW] drop flow src=%s dst=%s", src, dst)
+				_ = c.Close()
+			}, true
 		case udpRelay:
 			return func(c nettype.ConnPacketConn) {
+				log.Printf("[DEBUG-UDP643-GW] relay start src=%s dst=%s", src, dst)
 				relayUDP(c, dst.Addr().String(), dst.Port())
+				log.Printf("[DEBUG-UDP643-GW] relay end src=%s dst=%s", src, dst)
 			}, true
 		default: // udpPassthrough
+			log.Printf("[DEBUG-UDP643-GW] passthrough flow src=%s dst=%s", src, dst)
 			if orig != nil {
 				return orig(src, dst)
 			}
@@ -323,6 +333,21 @@ const (
 	udpDrop                              // black-hole (force a TCP fallback)
 	udpRelay                             // transparently relay to the upstream
 )
+
+func (d udpDisposition) String() string {
+	switch d {
+	case udpPassthrough:
+		return "passthrough"
+	case udpDNS:
+		return "dns"
+	case udpDrop:
+		return "drop"
+	case udpRelay:
+		return "relay"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(d))
+	}
+}
 
 // tsnetUDPDisposition decides how an exit-node UDP flow is handled.
 //
@@ -392,9 +417,10 @@ func (g *Gateway) tsnetUDPPeerOnboarded(addr netip.Addr) bool {
 // upstream lookup otherwise). The loop covers the few resolvers
 // that reuse the socket for follow-up queries; idle flows time
 // out and close so we don't leak goroutines.
-func (g *Gateway) serveTsnetUDPDNSFlow(c nettype.ConnPacketConn) {
+func (g *Gateway) serveTsnetUDPDNSFlow(c nettype.ConnPacketConn, src, dst netip.AddrPort) {
 	defer func() { _ = c.Close() }()
 	if g.dnsvip == nil {
+		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s: dnsvip nil", src, dst)
 		return
 	}
 	buf := make([]byte, 65535)
@@ -402,14 +428,19 @@ func (g *Gateway) serveTsnetUDPDNSFlow(c nettype.ConnPacketConn) {
 		_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 		n, err := c.Read(buf)
 		if err != nil {
+			log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s read err=%v", src, dst, err)
 			return
 		}
+		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s read bytes=%d", src, dst, n)
 		resp := g.dnsvip.HandlePacket(buf[:n], "")
+		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s response bytes=%d", src, dst, len(resp))
 		if len(resp) == 0 {
 			continue
 		}
 		_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		if _, err := c.Write(resp); err != nil {
+		wrote, err := c.Write(resp)
+		log.Printf("[DEBUG-UDP643-GW] dns flow src=%s dst=%s write bytes=%d err=%v", src, dst, wrote, err)
+		if err != nil {
 			return
 		}
 	}

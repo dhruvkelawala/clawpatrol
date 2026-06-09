@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"os"
@@ -189,12 +190,15 @@ func (f *runUDPForwarder) handle(pkt []byte) {
 	if !ok {
 		dstAddr := fmt.Sprintf("%d.%d.%d.%d:%d",
 			dstIP[0], dstIP[1], dstIP[2], dstIP[3], dstPort)
+		log.Printf("[DEBUG-UDP643] new flow %d.%d.%d.%d:%d -> %s payload=%d", srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort, dstAddr, len(payload))
 		var err error
 		conn, err = f.transport.Dial(context.Background(), "udp", dstAddr)
 		if err != nil {
+			log.Printf("[DEBUG-UDP643] dial %s failed: %v", dstAddr, err)
 			f.mu.Unlock()
 			return
 		}
+		log.Printf("[DEBUG-UDP643] dial %s ok local=%s remote=%s", dstAddr, conn.LocalAddr(), conn.RemoteAddr())
 		f.flows[key] = conn
 		go func() {
 			f.readResponses(conn, dstIP, srcIP, dstPort, srcPort)
@@ -206,7 +210,12 @@ func (f *runUDPForwarder) handle(pkt []byte) {
 	}
 	f.mu.Unlock()
 
-	_, _ = conn.Write(payload)
+	n, err := conn.Write(payload)
+	if err != nil {
+		log.Printf("[DEBUG-UDP643] write payload=%d wrote=%d err=%v", len(payload), n, err)
+	} else {
+		log.Printf("[DEBUG-UDP643] write payload=%d ok", len(payload))
+	}
 }
 
 func (f *runUDPForwarder) readResponses(conn net.Conn, srcIP, dstIP [4]byte, srcPort, dstPort uint16) {
@@ -215,8 +224,10 @@ func (f *runUDPForwarder) readResponses(conn net.Conn, srcIP, dstIP [4]byte, src
 		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		n, err := conn.Read(buf)
 		if err != nil {
+			log.Printf("[DEBUG-UDP643] read response %d.%d.%d.%d:%d -> %d.%d.%d.%d:%d err=%v", srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort, dstIP[0], dstIP[1], dstIP[2], dstIP[3], dstPort, err)
 			return
 		}
+		log.Printf("[DEBUG-UDP643] read response bytes=%d from %d.%d.%d.%d:%d", n, srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort)
 		_, _ = f.tunFile.Write(buildUDPPacket(srcIP, dstIP, srcPort, dstPort, buf[:n]))
 	}
 }
