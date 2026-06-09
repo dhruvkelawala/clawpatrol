@@ -49,21 +49,26 @@ func dialTsnetUDPRelay(ctx context.Context, dial udpRelayDialer, gateway, local 
 		return nil, fmt.Errorf("tsnet udp relay: parse destination %q: %w", dstAddr, err)
 	}
 	relayAddr := net.JoinHostPort(gateway.String(), strconv.Itoa(tsnetUDPRelayPort))
+	debugUDP640Logf("relay dial gateway=%s dst=%s token=%t", relayAddr, dst, token != "")
 	dialCtx, dialCancel := context.WithTimeout(ctx, udpRelayHandshakeLimit)
 	defer dialCancel()
 	c, err := dial(dialCtx, "tcp", relayAddr)
 	if err != nil {
+		debugUDP640Logf("relay dial gateway=%s failed: %v", relayAddr, err)
 		return nil, fmt.Errorf("tsnet udp relay: dial gateway %s: %w", relayAddr, err)
 	}
+	debugUDP640Logf("relay tcp connected gateway=%s local=%s", relayAddr, c.LocalAddr())
 	deadline := time.Now().Add(udpRelayHandshakeLimit)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 	_ = c.SetDeadline(deadline)
 	if err := writeUDPRelayHello(c, dst, local, token); err != nil {
+		debugUDP640Logf("relay hello write failed dst=%s: %v", dst, err)
 		_ = c.Close()
 		return nil, err
 	}
+	debugUDP640Logf("relay hello sent dst=%s; handshake ok", dst)
 	_ = c.SetDeadline(time.Time{})
 	return newUDPRelayStreamConn(c), nil
 }
@@ -78,6 +83,7 @@ func (g *Gateway) startTsnetUDPRelay(s *tsnet.Server) {
 		return
 	}
 	log.Printf("tsnet: udp relay listening on :%d", tsnetUDPRelayPort)
+	startTsnetNetstackStatsDumper(s, "GW")
 	go func() {
 		defer func() { _ = ln.Close() }()
 		for {
@@ -92,17 +98,21 @@ func (g *Gateway) startTsnetUDPRelay(s *tsnet.Server) {
 
 func (g *Gateway) handleTsnetUDPRelayConn(raw net.Conn) {
 	peer := peerIP(raw)
+	log.Printf("[DEBUG-UDP640-GW] relay accept peer=%s", peer)
 	_ = raw.SetDeadline(time.Now().Add(udpRelayHandshakeLimit))
 	dst, claimedPeer, token, err := readUDPRelayHello(raw)
 	if err != nil {
+		log.Printf("[DEBUG-UDP640-GW] relay malformed hello from %s: %v", peer, err)
 		log.Printf("tsnet udp-relay: malformed hello from %s: %v", peer, err)
 		_ = raw.Close()
 		return
 	}
 	_ = raw.SetDeadline(time.Time{})
+	log.Printf("[DEBUG-UDP640-GW] relay hello peer=%s dst=%s claimedPeer=%s token=%t", peer, dst, claimedPeer, token != "")
 
 	agentIP, profile, ok := g.authorizeTsnetUDPRelayPeer(peer, claimedPeer, token)
 	if !ok {
+		log.Printf("[DEBUG-UDP640-GW] relay reject unauthorized peer=%q", peer)
 		log.Printf("tsnet udp-relay: reject unauthorized peer %q", peer)
 		_ = raw.Close()
 		return
@@ -113,10 +123,14 @@ func (g *Gateway) handleTsnetUDPRelayConn(raw net.Conn) {
 	dstPort := dst.Port()
 	log.Printf("tsnet udp-relay: %s profile=%s -> %s", agentIP, profile, dst)
 	if dstPort == 53 && g.dnsvip != nil {
+		log.Printf("[DEBUG-UDP640-GW] relay dispatch=dnsvip agent=%s dst=%s", agentIP, dst)
 		g.dnsvip.ServeUDP(conn, g.udpRelayDNSOrigDst(dstIP, raw.LocalAddr()))
+		log.Printf("[DEBUG-UDP640-GW] relay dnsvip flow ended agent=%s dst=%s", agentIP, dst)
 		return
 	}
+	log.Printf("[DEBUG-UDP640-GW] relay dispatch=relayUDP agent=%s dst=%s", agentIP, dst)
 	relayUDP(conn, dstIP, dstPort)
+	log.Printf("[DEBUG-UDP640-GW] relay relayUDP flow ended agent=%s dst=%s", agentIP, dst)
 }
 
 func (g *Gateway) authorizeTsnetUDPRelayPeer(peer string, claimedPeer netip.Addr, token string) (agentIP, profile string, ok bool) {

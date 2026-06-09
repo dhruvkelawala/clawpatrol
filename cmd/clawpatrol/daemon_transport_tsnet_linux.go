@@ -85,7 +85,8 @@ func startTsnetTransport() (daemonTransport, error) {
 		ControlURL: controlURL,
 		Dir:        tsnetDir,
 		Ephemeral:  false,
-		Logf:       func(string, ...any) {},
+		// DEBUG-UDP640: silent by default; verbose when CLAWPATROL_DEBUG_TSNET=1.
+		Logf: tsnetDebugLogf("daemon", true),
 	}
 
 	log.Printf("daemon: joining tailnet as %q...", hn)
@@ -95,6 +96,10 @@ func startTsnetTransport() (daemonTransport, error) {
 		return nil, fmt.Errorf("waitTsnetUp: %w", err)
 	}
 	log.Printf("daemon: tailnet IP %s", tsIP)
+
+	// DEBUG-UDP640: client-side netstack counters (TCP segments moving = the
+	// relay's framed UDP is flowing both ways).
+	startTsnetNetstackStatsDumper(s, "DAEMON")
 
 	if err := setGatewayExitNode(s, gwIP); err != nil {
 		_ = s.Close()

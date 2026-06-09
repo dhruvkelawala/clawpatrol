@@ -191,12 +191,15 @@ func (f *runUDPForwarder) handle(pkt []byte) {
 	if !ok {
 		dstAddr := fmt.Sprintf("%d.%d.%d.%d:%d",
 			dstIP[0], dstIP[1], dstIP[2], dstIP[3], dstPort)
+		debugUDP640Logf("new flow %d.%d.%d.%d:%d -> %s payload=%d", srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort, dstAddr, len(payload))
 		var err error
 		conn, err = f.transport.Dial(context.Background(), "udp", dstAddr)
 		if err != nil {
+			debugUDP640Logf("dial %s (udp-relay) failed: %v", dstAddr, err)
 			f.mu.Unlock()
 			return
 		}
+		debugUDP640Logf("dial %s (udp-relay) ok type=%T local=%s remote=%s", dstAddr, conn, conn.LocalAddr(), conn.RemoteAddr())
 		f.flows[key] = conn
 		go func() {
 			f.readResponses(conn, dstIP, srcIP, dstPort, srcPort)
@@ -208,17 +211,27 @@ func (f *runUDPForwarder) handle(pkt []byte) {
 	}
 	f.mu.Unlock()
 
-	_, _ = conn.Write(payload)
+	if n, err := conn.Write(payload); err != nil {
+		debugUDP640Logf("write payload=%d (udp-relay) err=%v", len(payload), err)
+	} else {
+		debugUDP640Logf("write payload=%d (udp-relay) ok wrote=%d", len(payload), n)
+	}
 }
 
 func (f *runUDPForwarder) readResponses(conn net.Conn, srcIP, dstIP [4]byte, srcPort, dstPort uint16) {
 	buf := make([]byte, 65535)
+	debugUDP640Logf("waiting for reply (udp-relay) type=%T local=%s remote=%s src=%d.%d.%d.%d:%d dst=%d.%d.%d.%d:%d",
+		conn, conn.LocalAddr(), conn.RemoteAddr(),
+		srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort,
+		dstIP[0], dstIP[1], dstIP[2], dstIP[3], dstPort)
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(runUDPFlowIdleTimeout))
 		n, err := conn.Read(buf)
 		if err != nil {
+			debugUDP640Logf("read reply (udp-relay) src=%d.%d.%d.%d:%d err=%v", srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort, err)
 			return
 		}
+		debugUDP640Logf("read reply (udp-relay) bytes=%d src=%d.%d.%d.%d:%d", n, srcIP[0], srcIP[1], srcIP[2], srcIP[3], srcPort)
 		_, _ = f.tunFile.Write(buildUDPPacket(srcIP, dstIP, srcPort, dstPort, buf[:n]))
 	}
 }

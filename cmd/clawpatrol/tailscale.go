@@ -122,6 +122,9 @@ func openListener(cfg *config.Gateway, stateDir string) (*tsnet.Server, net.List
 		AuthKey:    authKey,
 		ControlURL: ts.ControlURL,
 		Dir:        dir,
+		// DEBUG-UDP640: route tsnet internals to the log when
+		// CLAWPATROL_DEBUG_TSNET=1; otherwise tsnet's default sink.
+		Logf: tsnetDebugLogf("gateway", false),
 	}
 	// Bring tsnet up. We don't need a tailnet TCP listener — exit-node
 	// routing delivers client conns straight to RegisterFallbackTCPHandler.
