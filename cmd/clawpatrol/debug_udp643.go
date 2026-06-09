@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"tailscale.com/tsnet"
 	"tailscale.com/wgengine/netstack"
 )
 
@@ -52,11 +53,13 @@ func tsnetDebugLogf(side string, quietWhenOff bool) func(string, ...any) {
 	return nil
 }
 
-// startNetstackStatsDumper periodically logs the gateway netstack's IP /
-// UDP / forwarding counters as JSON. The forwarding + outgoing-error
-// counters are the tell for a dropped UDP return packet (src=8.8.8.8 with
-// no route back out of the stack). No-op unless verbose logging is on.
-func startNetstackStatsDumper(ns *netstack.Impl) {
+// startNetstackStatsDumper periodically logs a netstack's IP / UDP /
+// forwarding counters as JSON. The forwarding + outgoing-error counters are
+// the tell for a dropped UDP return packet (src=8.8.8.8 with no route back
+// out of the stack); udp_packets_received is the tell for whether the
+// gateway's reply ever reached the client netstack. No-op unless verbose
+// logging is on. tag distinguishes "GW" from "DAEMON".
+func startNetstackStatsDumper(ns *netstack.Impl, tag string) {
 	if ns == nil || !debugTsnetVerbose() {
 		return
 	}
@@ -64,9 +67,34 @@ func startNetstackStatsDumper(ns *netstack.Impl) {
 		t := time.NewTicker(5 * time.Second)
 		defer t.Stop()
 		for range t.C {
-			log.Printf("[DEBUG-UDP643-GW] netstack stats: %s", ns.ExpVar().String())
+			log.Printf("[DEBUG-UDP643-%s] netstack stats: %s", tag, ns.ExpVar().String())
 		}
 	}()
+}
+
+// startDaemonNetstackStatsDumper extracts the daemon tsnet server's
+// underlying gVisor netstack and starts the periodic counter dump on the
+// client side. No-op unless verbose logging is on.
+func startDaemonNetstackStatsDumper(s *tsnet.Server) {
+	if s == nil || !debugTsnetVerbose() {
+		return
+	}
+	sys := s.Sys()
+	if sys == nil {
+		log.Printf("[DEBUG-UDP643-DAEMON] netstack stats skipped — Sys() nil")
+		return
+	}
+	impl, ok := sys.Netstack.GetOK()
+	if !ok {
+		log.Printf("[DEBUG-UDP643-DAEMON] netstack stats skipped — netstack not registered")
+		return
+	}
+	ns, ok := impl.(*netstack.Impl)
+	if !ok {
+		log.Printf("[DEBUG-UDP643-DAEMON] netstack stats skipped — %T not *netstack.Impl", impl)
+		return
+	}
+	startNetstackStatsDumper(ns, "DAEMON")
 }
 
 // logNetstackStats dumps a one-shot counter snapshot tagged with a label,

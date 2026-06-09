@@ -95,6 +95,11 @@ func startTsnetTransport() (daemonTransport, error) {
 	}
 	log.Printf("daemon: tailnet IP %s", tsIP)
 
+	// DEBUG-UDP643: dump the daemon's own netstack counters so we can see
+	// whether the gateway's UDP reply ever reaches the client netstack
+	// (udp_packets_received delta) or is dropped before it (filter/ACL).
+	startDaemonNetstackStatsDumper(s)
+
 	if err := setGatewayExitNode(s, gwIP); err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("set exit-node %s: %w", gwIP, err)

@@ -299,7 +299,7 @@ func (g *Gateway) installTsnetUDPCatchAll(s *tsnet.Server) {
 	}
 	g.tsNetstack = ns
 	g.logNetstackStats("catch-all-installed")
-	startNetstackStatsDumper(ns)
+	startNetstackStatsDumper(ns, "GW")
 	orig := ns.GetUDPHandlerForFlow
 	ns.GetUDPHandlerForFlow = func(src, dst netip.AddrPort) (func(nettype.ConnPacketConn), bool) {
 		disp := g.tsnetUDPDisposition(dst, src.Addr())
