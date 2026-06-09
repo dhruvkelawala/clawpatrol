@@ -46,12 +46,18 @@ if pids="$(pgrep -f "$bin gateway" || true)"; [[ -n "$pids" ]]; then
   sleep 1
 fi
 
-echo "starting gateway as $user with config $config (TS_DEBUG_NETSTACK + CLAWPATROL_DEBUG_TSNET on)"
+# The [DEBUG-UDP640-GW] relay lines (accept / hello / auth / dispatch) are
+# ALWAYS on, so the relay diagnosis needs no debug env. The verbose tsnet +
+# gVisor packet trace (TS_DEBUG_NETSTACK) is a firehose that can fill /tmp on a
+# small instance, so it is opt-in: re-run with DEBUG_VERBOSE=1 only if needed.
+verbose_env=()
+if [[ "${DEBUG_VERBOSE:-0}" != "0" ]]; then
+  echo "DEBUG_VERBOSE on: enabling CLAWPATROL_DEBUG_TSNET (no TS_DEBUG_NETSTACK firehose)"
+  verbose_env=(CLAWPATROL_DEBUG_TSNET=1)
+fi
+echo "starting gateway as $user with config $config"
 : >"$log"
-sudo -u "$user" \
-  TS_DEBUG_NETSTACK=1 \
-  CLAWPATROL_DEBUG_TSNET=1 \
-  nohup "$bin" gateway "$config" >"$log" 2>&1 &
+sudo -u "$user" "${verbose_env[@]}" nohup "$bin" gateway "$config" >"$log" 2>&1 &
 sleep 5
 
 echo
