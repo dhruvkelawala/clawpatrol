@@ -12,6 +12,14 @@ are resolved; it is the source of truth for the eventual PR comments.
 
 ---
 
+## Posted PR comments (2026-06-09)
+
+- #643: https://github.com/denoland/clawpatrol/pull/643#issuecomment-4658740771
+  (catch-all is correct but insufficient for tsnet clients; reply dropped by
+  the client packet filter — evidence below).
+- #640: https://github.com/denoland/clawpatrol/pull/640#issuecomment-4658740953
+  (confirmed working live for DNS + arbitrary UDP; soak shows no leak).
+
 ## TL;DR (paste-ready conclusion)
 
 The tsnet UDP failure is **specific to #643's native-UDP design**, and it is a
