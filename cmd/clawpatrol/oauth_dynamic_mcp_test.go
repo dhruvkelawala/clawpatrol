@@ -11,18 +11,48 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func TestIsDynamicMCPTokenURLIncludesAmplitudeAndNotion(t *testing.T) {
-	for _, u := range []string{
-		"https://mcp.notion.com/token",
-		"https://mcp.amplitude.com/token",
-		"https://mcp.eu.amplitude.com/token",
-	} {
-		if !isDynamicMCPTokenURL(u) {
-			t.Fatalf("isDynamicMCPTokenURL(%q) = false", u)
+func TestDynamicMCPRefreshSelectedByFlowForAnyTokenURL(t *testing.T) {
+	var sawRefresh bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRefresh = true
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want no client-auth header", got)
 		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if got := r.Form.Get("client_id"); got != "external-dynamic-client" {
+			t.Fatalf("client_id = %q, want external-dynamic-client", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer ts.Close()
+
+	state := newState(&OAuthIntegration{
+		ID:   "external-mcp",
+		Flow: "dynamic_mcp",
+		OAuth: OAuthConfig{
+			ClientID: "external-dynamic-client",
+			TokenURL: ts.URL,
+		},
+	}, nil)
+	state.setToken(&oauth2.Token{
+		AccessToken:  "old-access",
+		RefreshToken: "old-refresh",
+		TokenType:    "Bearer",
+		Expiry:       time.Now().Add(-time.Hour),
+	})
+
+	tok, err := state.source.Token()
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
 	}
-	if isDynamicMCPTokenURL("https://api.example.com/token") {
-		t.Fatalf("isDynamicMCPTokenURL matched unrelated URL")
+	if !sawRefresh {
+		t.Fatalf("token server was not called")
+	}
+	if tok.AccessToken != "new-access" || tok.RefreshToken != "new-refresh" {
+		t.Fatalf("token = %#v, want refreshed access/refresh", tok)
 	}
 }
 

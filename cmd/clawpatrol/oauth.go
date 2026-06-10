@@ -56,11 +56,12 @@ type oauthState struct {
 	displayName string // human-readable name (e.g. github login)
 	avatarURL   string // dashboard pfp
 	// clientID is the dynamically-registered OAuth client_id for flows
-	// that use RFC 7591 (notion_mcp). Static-ClientID flows (github,
-	// anthropic, codex) leave this empty and use cfg.ClientID. Persisted
-	// in the credentials table alongside the tokens so refresh works
-	// across gateway restarts.
+	// that use RFC 7591 (notion_mcp/dynamic_mcp). Static-ClientID flows
+	// (github, anthropic, codex) leave this empty and use cfg.ClientID.
+	// Persisted in the credentials table alongside the tokens so refresh
+	// works across gateway restarts.
 	clientID string
+	flow     string
 	db       *sql.DB
 	mu       sync.Mutex
 }
@@ -335,6 +336,7 @@ func newState(it *OAuthIntegration, db *sql.DB) *oauthState {
 		header: header,
 		prefix: prefix,
 		id:     it.ID,
+		flow:   it.Flow,
 		db:     db,
 	}
 }
@@ -347,10 +349,12 @@ func (s *oauthState) setToken(tok *oauth2.Token) {
 		// (returns "Invalid request format" otherwise). Stdlib oauth2
 		// only sends form-urlencoded.
 		base = &anthropicRefreshSource{cfg: s.cfg, current: tok}
-	case isDynamicMCPTokenURL(s.cfg.Endpoint.TokenURL):
+	case s.flow == "dynamic_mcp" || s.flow == "notion_mcp":
 		// Hosted MCP token endpoints refresh via form-urlencoded body and
 		// expect the dynamically registered client_id (no static
-		// ClientSecret — PKCE-only public client).
+		// ClientSecret — PKCE-only public client). The flow, not the
+		// provider hostname, selects this behavior so external credential
+		// plugins can supply their own MCP OAuth endpoints.
 		base = &dynamicMCPRefreshSource{cfg: s.cfg, current: tok}
 	default:
 		base = s.cfg.TokenSource(context.Background(), tok)
@@ -1162,12 +1166,6 @@ func exchangeOAuthCode(ctx context.Context, sess *oauthSession, code, state stri
 
 func isAnthropicTokenURL(u string) bool {
 	return strings.Contains(u, "anthropic.com/")
-}
-
-func isDynamicMCPTokenURL(u string) bool {
-	return strings.Contains(u, "mcp.notion.com/") ||
-		strings.Contains(u, "mcp.amplitude.com/") ||
-		strings.Contains(u, "mcp.eu.amplitude.com/")
 }
 
 // dynamicMCPRefreshSource refreshes hosted MCP OAuth tokens via the
